@@ -22,13 +22,20 @@ const listPublic = asyncHandler(async (req, res) => {
 
 // GET /api/announcements/hero (public) — the single most relevant one for the Hero card
 const getHeroAnnouncement = asyncHandler(async (req, res) => {
-  const { data, error } = await scopedAnnouncements(supabase
+  let query = supabase
     .from('announcements')
     .select('*, branches(name)')
     .eq('status', 'active')
     .eq('show_on_hero', true)
     .order('created_at', { ascending: false })
-    .limit(1), req.query.branch_id);
+    .limit(1);
+
+  // The Hero has no branch selector: show the latest Flash News regardless of
+  // branch, and include its branch name in the card. A supplied branch_id still
+  // limits results to common news plus that selected branch.
+  if (req.query.branch_id) query = scopedAnnouncements(query, req.query.branch_id);
+
+  const { data, error } = await query;
   if (error) throw ApiError.internal(error.message);
   sendResponse(res, 200, data?.[0] || null);
 });
@@ -44,7 +51,9 @@ const listAdmin = asyncHandler(async (req, res) => {
 // paste an image_url directly — either way only the URL string is persisted.
 const createAnnouncement = asyncHandler(async (req, res) => {
   const payload = { ...req.body };
-  if (!payload.title) throw ApiError.badRequest('title is required');
+  if (!payload.description?.trim()) throw ApiError.badRequest('description is required');
+  // Flash News uses one message field; keep the legacy required title column in sync.
+  payload.title = payload.description.trim();
   if (payload.show_on_hero !== undefined) payload.show_on_hero = payload.show_on_hero === 'true' || payload.show_on_hero === true;
   payload.branch_id = normaliseBranchId(payload.branch_id);
 
