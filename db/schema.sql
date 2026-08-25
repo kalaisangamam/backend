@@ -130,6 +130,25 @@ create table if not exists programs (
 alter table programs add column if not exists tagline text;
 
 -- =====================================================================
+-- BRANCHES (public contact locations; scalable beyond the initial 3)
+-- =====================================================================
+create table if not exists branches (
+  id                uuid primary key default gen_random_uuid(),
+  name              text not null,
+  address           text,
+  map_url           text,
+  contact_number_1  text,
+  contact_number_2  text,
+  contact_number_3  text,
+  email             text,
+  working_hours     text,
+  status            text not null default 'active' check (status in ('active', 'inactive')),
+  display_order     int not null default 0,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+-- =====================================================================
 -- STUDENT <-> PROGRAM ENROLLMENT (student's current program/level)
 -- =====================================================================
 create table if not exists student_programs (
@@ -231,6 +250,7 @@ create table if not exists announcements (
   contact_info          text,
   status                text not null default 'active' check (status in ('active', 'inactive')),
   show_on_hero          boolean not null default true,
+  branch_id             uuid references branches(id) on delete set null, -- null = Common
   created_at            timestamptz not null default now(),
   updated_at            timestamptz not null default now()
 );
@@ -364,6 +384,8 @@ create index if not exists idx_masters_order on masters(display_order);
 create index if not exists idx_gallery_order on gallery(display_order);
 create index if not exists idx_gallery_category on gallery(category);
 create index if not exists idx_programs_order on programs(display_order);
+create index if not exists idx_branches_public_order on branches(status, display_order);
+create index if not exists idx_announcements_branch_id on announcements(branch_id);
 create index if not exists idx_achievements_order on achievements(display_order);
 create index if not exists idx_events_status on events(status);
 create index if not exists idx_events_date on events(event_date);
@@ -388,7 +410,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['users','students','programs','student_programs','masters',
-    'student_registration_requests','contact_enquiries','achievements','gallery','announcements','events',
+    'student_registration_requests','contact_enquiries','achievements','gallery','announcements','events','branches',
     'testimonials','faqs','fees']
   loop
     execute format('drop trigger if exists trg_updated_at on %I;', t);
