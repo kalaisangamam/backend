@@ -95,11 +95,75 @@ const getMonthlyHistory = asyncHandler(async (req, res) => {
 });
 
 const pdf = (history) => {
-  const lines = ['KALAI SANGAMAM ACADEMY', 'MONTHLY FEE HISTORY', history.month.toUpperCase(), '', `Total Students: ${history.total_students}`, `Total Fee: Rs. ${history.total_fee}`, `Total Paid: Rs. ${history.total_paid}`, `Total Balance: Rs. ${history.total_balance}`, `Total Transactions: ${history.total_transactions}`, '', 'STUDENT ID | STUDENT | PROGRAMME | FEE | PAID | BALANCE | STATUS'];
-  history.fees.forEach((fee) => lines.push(`${fee.students?.student_code || '-'} | ${fee.students?.full_name || '-'} | ${fee.programs?.name || 'Unassigned'} | Rs. ${fee.fee_amount} | Rs. ${fee.paid_amount} | Rs. ${fee.pending_amount} | ${fee.status}`)); lines.push('', 'PAYMENT TRANSACTIONS'); history.fees.forEach((fee) => fee.payments.forEach((payment) => lines.push(`${fee.students?.full_name || '-'} | ${fee.programs?.name || 'Unassigned'} | ${payment.payment_date} | Rs. ${payment.amount} | ${payment.payment_note || '-'}`)));
-  const pages = []; for (let i = 0; i < lines.length; i += 42) pages.push(lines.slice(i, i + 42)); const objects = ['<< /Type /Catalog /Pages 2 0 R >>', `<< /Type /Pages /Kids [${pages.map((_, i) => `${3 + i * 2} 0 R`).join(' ')}] /Count ${pages.length} >>`];
-  pages.forEach((page, i) => { const pageNo = 3 + i * 2; const contentNo = pageNo + 1; const content = `BT /F1 10 Tf 40 800 Td 14 TL ${page.map((line, index) => `${index ? 'T* ' : ''}(${safePdf(line)}) Tj`).join('\n')} ET`; objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents ${contentNo} 0 R >>`, `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`); });
-  let output = '%PDF-1.4\n'; const offsets = [0]; objects.forEach((object, i) => { offsets.push(Buffer.byteLength(output)); output += `${i + 1} 0 obj\n${object}\nendobj\n`; }); const start = Buffer.byteLength(output); output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`; return Buffer.from(output);
+  // A dependency-free PDF report. Keeping the layout here avoids requiring a browser or
+  // a heavyweight renderer on the API server while still producing a print-ready report.
+  const pageWidth = 842; const pageHeight = 595; const margin = 36; const bottom = 45;
+  const colours = { navy: '0.09 0.13 0.20', brass: '0.72 0.53 0.20', ink: '0.16 0.20 0.27', muted: '0.39 0.44 0.52', line: '0.86 0.88 0.91', pale: '0.96 0.97 0.98', green: '0.12 0.48 0.31', red: '0.68 0.20 0.23', amber: '0.72 0.47 0.10' };
+  const moneyPdf = (value) => `Rs. ${n(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const short = (value, width, size = 8) => {
+    const text = safePdf(value || '-'); const max = Math.max(3, Math.floor(width / (size * 0.52)));
+    return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+  };
+  const pages = []; let stream = []; let y = pageHeight - margin;
+  const add = (value) => stream.push(value);
+  const rect = (x, top, width, height, fill) => add(`q ${fill} rg ${x} ${top - height} ${width} ${height} re f Q`);
+  const line = (x1, y1, x2, y2, colour = colours.line) => add(`q ${colour} RG 0.5 w ${x1} ${y1} m ${x2} ${y2} l S Q`);
+  const text = (value, x, top, size = 9, colour = colours.ink, bold = false, align = 'left', width = 0) => {
+    const label = safePdf(value); const estimate = label.length * size * (bold ? 0.55 : 0.50);
+    const left = align === 'right' ? x + width - estimate : align === 'center' ? x + (width - estimate) / 2 : x;
+    add(`BT /F${bold ? 2 : 1} ${size} Tf ${colour} rg 1 0 0 1 ${Math.max(x, left).toFixed(2)} ${(top - size).toFixed(2)} Tm (${label}) Tj ET`);
+  };
+  const footer = () => { line(margin, 30, pageWidth - margin, 30); text('Kalai Sangamam Academy  |  Monthly Fee Report', margin, 22, 7, colours.muted); text(`Page ${pages.length + 1}`, pageWidth - margin - 60, 22, 7, colours.muted, false, 'right', 60); };
+  const finishPage = () => { footer(); pages.push(stream.join('\n')); stream = []; y = pageHeight - margin; };
+  const reportHeader = (compact = false) => {
+    rect(0, pageHeight, pageWidth, compact ? 58 : 80, colours.navy);
+    text('KALAI SANGAMAM ACADEMY', margin, pageHeight - 18, compact ? 14 : 18, '1 1 1', true);
+    text(compact ? 'MONTHLY FEE HISTORY' : 'MONTHLY FEE HISTORY REPORT', margin, pageHeight - (compact ? 37 : 46), compact ? 7 : 9, '0.82 0.85 0.89', true);
+    text(history.month.toUpperCase(), pageWidth - margin - 190, pageHeight - 28, compact ? 11 : 14, colours.brass, true, 'right', 190);
+    y = pageHeight - (compact ? 78 : 103);
+  };
+  const section = (title) => { text(title.toUpperCase(), margin, y, 8, colours.muted, true); y -= 11; line(margin, y, pageWidth - margin, y); y -= 12; };
+  const tableHeader = (columns) => { rect(margin, y, pageWidth - margin * 2, 19, colours.navy); columns.forEach((column) => text(column.label, column.x + 7, y - 5, 7, '1 1 1', true, column.align || 'left', column.width - 14)); y -= 19; };
+  const ensure = (height, continuation) => { if (y - height < bottom) { finishPage(); reportHeader(true); continuation(); } };
+
+  reportHeader();
+  const cards = [
+    ['STUDENTS', history.total_students, colours.ink], ['PROGRAMMES', history.total_programmes, colours.ink], ['TOTAL FEE', moneyPdf(history.total_fee), colours.ink], ['RECEIVED', moneyPdf(history.total_paid), colours.green], ['OUTSTANDING', moneyPdf(history.total_balance), colours.red], ['TRANSACTIONS', history.total_transactions, colours.ink]
+  ];
+  const cardWidth = (pageWidth - margin * 2 - 25) / 6;
+  cards.forEach(([label, value, colour], index) => { const x = margin + index * (cardWidth + 5); rect(x, y, cardWidth, 49, colours.pale); text(label, x + 9, y - 12, 6.5, colours.muted, true); text(value, x + 9, y - 32, 10, colour, true); });
+  y -= 68;
+
+  const feeColumns = [
+    { label: 'STUDENT ID', x: margin, width: 78 }, { label: 'STUDENT', x: margin + 78, width: 145 }, { label: 'PROGRAMME', x: margin + 223, width: 130 }, { label: 'FEE', x: margin + 353, width: 82, align: 'right' }, { label: 'PAID', x: margin + 435, width: 82, align: 'right' }, { label: 'BALANCE', x: margin + 517, width: 88, align: 'right' }, { label: 'STATUS', x: margin + 605, width: 129, align: 'center' }
+  ];
+  const feeTable = () => { section('Fee records'); tableHeader(feeColumns); };
+  feeTable();
+  history.fees.forEach((fee, index) => {
+    ensure(25, feeTable); const rowTop = y;
+    if (index % 2 === 0) rect(margin, rowTop, pageWidth - margin * 2, 25, colours.pale);
+    text(short(fee.students?.student_code, 64), feeColumns[0].x + 7, rowTop - 8, 8);
+    text(short(fee.students?.full_name, 131), feeColumns[1].x + 7, rowTop - 8, 8, colours.ink, true);
+    text(short(fee.programs?.name || 'Unassigned', 116), feeColumns[2].x + 7, rowTop - 8, 8);
+    text(moneyPdf(fee.fee_amount), feeColumns[3].x + 7, rowTop - 8, 8, colours.ink, false, 'right', feeColumns[3].width - 14);
+    text(moneyPdf(fee.paid_amount), feeColumns[4].x + 7, rowTop - 8, 8, colours.green, false, 'right', feeColumns[4].width - 14);
+    text(moneyPdf(fee.pending_amount), feeColumns[5].x + 7, rowTop - 8, 8, n(fee.pending_amount) > 0 ? colours.red : colours.green, false, 'right', feeColumns[5].width - 14);
+    const status = fee.status === 'paid' ? 'PAID' : fee.status === 'partially_paid' ? 'PARTIALLY PAID' : 'PENDING'; const statusColour = fee.status === 'paid' ? colours.green : fee.status === 'partially_paid' ? colours.amber : colours.red;
+    rect(feeColumns[6].x + 20, rowTop - 5, 88, 14, statusColour); text(status, feeColumns[6].x + 20, rowTop - 8, 6.5, '1 1 1', true, 'center', 88);
+    y -= 25;
+  });
+
+  const payments = history.fees.flatMap((fee) => (fee.payments || []).map((payment) => ({ ...payment, student: fee.students?.full_name || '-', programme: fee.programs?.name || 'Unassigned' })));
+  if (payments.length) {
+    const paymentColumns = [{ label: 'PAYMENT DATE', x: margin, width: 105 }, { label: 'STUDENT', x: margin + 105, width: 170 }, { label: 'PROGRAMME', x: margin + 275, width: 150 }, { label: 'AMOUNT', x: margin + 425, width: 110, align: 'right' }, { label: 'NOTE', x: margin + 535, width: 199 }];
+    const paymentTable = () => { section('Payment transactions'); tableHeader(paymentColumns); };
+    ensure(42, paymentTable); paymentTable();
+    payments.forEach((payment, index) => { ensure(25, paymentTable); const rowTop = y; if (index % 2 === 0) rect(margin, rowTop, pageWidth - margin * 2, 25, colours.pale); text(short(payment.payment_date, 91), paymentColumns[0].x + 7, rowTop - 8, 8); text(short(payment.student, 156), paymentColumns[1].x + 7, rowTop - 8, 8, colours.ink, true); text(short(payment.programme, 136), paymentColumns[2].x + 7, rowTop - 8, 8); text(moneyPdf(payment.amount), paymentColumns[3].x + 7, rowTop - 8, 8, colours.green, false, 'right', paymentColumns[3].width - 14); text(short(payment.payment_note || '-', 185), paymentColumns[4].x + 7, rowTop - 8, 8, colours.muted); y -= 25; });
+  }
+  finishPage();
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', `<< /Type /Pages /Kids [${pages.map((_, index) => `${5 + index * 2} 0 R`).join(' ')}] /Count ${pages.length} >>`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>'];
+  pages.forEach((content, index) => { const pageNo = 5 + index * 2; const contentNo = pageNo + 1; objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentNo} 0 R >>`, `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`); });
+  let output = '%PDF-1.4\n'; const offsets = [0]; objects.forEach((object, index) => { offsets.push(Buffer.byteLength(output)); output += `${index + 1} 0 obj\n${object}\nendobj\n`; }); const start = Buffer.byteLength(output); output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`; return Buffer.from(output);
 };
 
 const downloadMonthlyPdf = asyncHandler(async (req, res) => {
