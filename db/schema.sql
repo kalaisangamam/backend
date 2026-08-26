@@ -326,6 +326,7 @@ create table if not exists attendance (
 create table if not exists fees (
   id              uuid primary key default gen_random_uuid(),
   student_id      uuid not null references students(id) on delete cascade,
+  programme_id    uuid not null references programs(id) on delete restrict,
   month           text not null,       -- e.g. 'August 2026'
   fee_amount      numeric(10,2) not null default 0,
   paid_amount     numeric(10,2) not null default 0,
@@ -336,7 +337,7 @@ create table if not exists fees (
   updated_by      uuid references users(id),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  unique (student_id, month)
+  unique (student_id, programme_id, month)
 );
 
 -- Individual payments applied to one monthly fee record. A student can make
@@ -390,7 +391,7 @@ create index if not exists idx_achievements_order on achievements(display_order)
 create index if not exists idx_events_status on events(status);
 create index if not exists idx_events_date on events(event_date);
 create index if not exists idx_attendance_student_date on attendance(student_id, date);
-create index if not exists idx_fees_student_month on fees(student_id, month);
+create index if not exists idx_fees_student_programme_month on fees(student_id, programme_id, month);
 create index if not exists idx_fee_payments_fee_id on fee_payments(fee_id);
 create index if not exists idx_testimonials_order on testimonials(display_order);
 create index if not exists idx_faqs_order on faqs(display_order);
