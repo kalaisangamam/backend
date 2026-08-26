@@ -159,7 +159,7 @@ const createStudentFromPayload = async (body) => {
 // GET /api/students (admin) - optional ?search=&status=
 const listStudents = asyncHandler(async (req, res) => {
   const { search, status } = req.query;
-  let query = supabase.from('students').select('*, users:user_id(username, email, status), student_programs(program_id, status)');
+  let query = supabase.from('students').select('*, users:user_id(username, email, status), student_programs(program_id, current_level, status)');
   if (status) query = query.eq('status', status);
   if (search) query = query.ilike('full_name', `%${search}%`);
   query = query.order('created_at', { ascending: false });
@@ -456,10 +456,49 @@ const deleteStudentPermanently = asyncHandler(async (req, res) => {
   sendResponse(res, 200, { id: student.id }, 'Student permanently deleted');
 });
 
+const validateProgramLevel = async (programId, level, { requireActive = true } = {}) => {
+  const { data: program, error } = await supabase.from('programs').select('id, name, levels, status').eq('id', programId).maybeSingle();
+  if (error) throw ApiError.badRequest(error.message);
+  if (!program || (requireActive && program.status !== 'active')) throw ApiError.badRequest('Please select a valid active program');
+  const configuredLevels = (program.levels || []).map((item) => String(item).trim()).filter(Boolean);
+  if (!configuredLevels.includes(level)) throw ApiError.badRequest(`"${level}" is not a configured level for ${program.name}`);
+  return program;
+};
+
+// GET /api/students/level-enrollments?program_id=... (admin)
+const listLevelEnrollments = asyncHandler(async (req, res) => {
+  const programId = req.query.program_id;
+  if (!programId) throw ApiError.badRequest('program_id is required');
+  const { data, error } = await supabase.from('student_programs')
+    .select('id, student_id, program_id, current_level, enrolled_at, students!inner(id, full_name, student_code, status)')
+    .eq('program_id', programId).eq('status', 'active').eq('students.status', 'active')
+    .order('full_name', { foreignTable: 'students', ascending: true });
+  if (error) throw ApiError.internal(error.message);
+  sendResponse(res, 200, data || []);
+});
+
+// POST /api/students/levels/assign (admin) — assigns one configured level to many active enrolments.
+const assignLevelsBulk = asyncHandler(async (req, res) => {
+  const { program_id, student_ids, level } = req.body;
+  const studentIds = [...new Set((student_ids || []).filter(Boolean))]; const selectedLevel = String(level || '').trim();
+  if (!program_id || !studentIds.length || !selectedLevel) throw ApiError.badRequest('program_id, student_ids and level are required');
+  await validateProgramLevel(program_id, selectedLevel);
+  const { data: enrollments, error } = await supabase.from('student_programs').select('student_id, students!inner(status)')
+    .eq('program_id', program_id).eq('status', 'active').eq('students.status', 'active').in('student_id', studentIds);
+  if (error) throw ApiError.badRequest(error.message);
+  if ((enrollments || []).length !== studentIds.length) throw ApiError.badRequest('Every selected student must be actively enrolled in the selected program');
+  const { data, error: updateError } = await supabase.from('student_programs').update({ current_level: selectedLevel })
+    .eq('program_id', program_id).eq('status', 'active').in('student_id', studentIds)
+    .select('id, student_id, program_id, current_level, students(full_name, student_code)');
+  if (updateError) throw ApiError.badRequest(updateError.message);
+  sendResponse(res, 200, data || [], `Level assigned to ${studentIds.length} student${studentIds.length === 1 ? '' : 's'}.`);
+});
+
 // POST /api/students/:id/programs (admin) — assign a program + level
 const assignProgram = asyncHandler(async (req, res) => {
   const { program_id, current_level } = req.body;
   if (!program_id) throw ApiError.badRequest('program_id is required');
+  if (current_level !== undefined && current_level !== null && String(current_level).trim()) await validateProgramLevel(program_id, String(current_level).trim());
 
   const { data, error } = await supabase
     .from('student_programs')
@@ -502,6 +541,8 @@ module.exports = {
   updateStudent,
   deactivateStudent,
   deleteStudentPermanently,
+  listLevelEnrollments,
+  assignLevelsBulk,
   assignProgram,
   getMyProfile,
 };
