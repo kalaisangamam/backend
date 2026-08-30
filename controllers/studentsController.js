@@ -421,6 +421,14 @@ const updateStudent = asyncHandler(async (req, res) => {
     .single();
   if (error || !data) throw ApiError.notFound('Student not found');
 
+  if (payload.status !== undefined) {
+    const { error: userStatusError } = await supabase
+      .from('users')
+      .update({ status: payload.status })
+      .eq('id', data.user_id);
+    if (userStatusError) throw ApiError.badRequest(userStatusError.message);
+  }
+
   if (programSelectionWasProvided) {
     await syncStudentPrograms(data.id, normalizeProgramIds(req.body));
   }
