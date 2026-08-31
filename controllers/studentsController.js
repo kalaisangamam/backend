@@ -6,11 +6,20 @@ const ApiError = require('../utils/ApiError');
 
 const generateStudentCode = async () => {
   const year = new Date().getFullYear();
-  const { count } = await supabase
+  const prefix = `KS-${year}-`;
+  const { data: students, error } = await supabase
     .from('students')
-    .select('id', { count: 'exact', head: true });
-  const seq = String((count || 0) + 1).padStart(4, '0');
-  return `KS-${year}-${seq}`;
+    .select('student_code')
+    .like('student_code', `${prefix}%`);
+  if (error) throw ApiError.badRequest(error.message);
+
+  const highestSequence = (students || []).reduce((highest, student) => {
+    const match = student.student_code?.match(new RegExp(`^KS-${year}-(\\d+)$`));
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0);
+
+  const seq = String(highestSequence + 1).padStart(4, '0');
+  return `${prefix}${seq}`;
 };
 
 // GET /api/students (admin) — optional ?search=&status=
@@ -58,6 +67,27 @@ const getProgramSelectionData = async (selectedProgramIds) => {
     program_ids: selectedProgramIds,
     program_names: selectedProgramIds.map((id) => byId.get(id)).filter(Boolean),
   };
+};
+
+const rejectDuplicateCredentials = async (username, password) => {
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('password_hash')
+    .eq('username', username);
+  if (error) throw ApiError.badRequest(error.message);
+
+  const { data: requests, error: requestError } = await supabase
+    .from('student_registration_requests')
+    .select('password_hash')
+    .eq('username', username)
+    .eq('status', 'pending');
+  if (requestError) throw ApiError.badRequest(requestError.message);
+
+  const matchingPassword = [...(users || []), ...(requests || [])]
+    .some((record) => bcrypt.compareSync(password, record.password_hash));
+  if (matchingPassword) {
+    throw ApiError.conflict('This username and password combination is already in use');
+  }
 };
 
 // Keep the denormalized fields used by profile/testimonial screens aligned
@@ -120,6 +150,8 @@ const createStudentFromPayload = async (body) => {
     throw ApiError.badRequest('username, password and full_name are required');
   }
 
+  if (password) await rejectDuplicateCredentials(username, password);
+
   const finalPasswordHash = password_hash || await bcrypt.hash(password, 10);
   const { data: user, error: userError } = await supabase
     .from('users')
@@ -180,21 +212,7 @@ const registerStudentRequest = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('Password must be at least 6 characters');
   }
 
-  const { data: usernameExists } = await supabase
-    .from('users')
-    .select('id')
-    .eq('username', username)
-    .maybeSingle();
-  if (usernameExists) throw ApiError.conflict('Username is already in use');
-
-  if (email) {
-    const { data: emailExists } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .maybeSingle();
-    if (emailExists) throw ApiError.conflict('Email is already in use');
-  }
+  await rejectDuplicateCredentials(username, password);
 
   const { data: validPrograms, error: validProgramsError } = await supabase
     .from('programs')
@@ -204,24 +222,6 @@ const registerStudentRequest = asyncHandler(async (req, res) => {
 
   if (validProgramsError || validPrograms.length !== selectedProgramIds.length) {
     throw ApiError.badRequest('Please select valid active programs');
-  }
-
-  const { data: existingRequest } = await supabase
-    .from('student_registration_requests')
-    .select('id')
-    .eq('username', username)
-    .eq('status', 'pending')
-    .maybeSingle();
-  if (existingRequest) throw ApiError.conflict('A pending request already exists for this username');
-
-  if (email) {
-    const { data: existingEmailRequest } = await supabase
-      .from('student_registration_requests')
-      .select('id')
-      .eq('email', email)
-      .eq('status', 'pending')
-      .maybeSingle();
-    if (existingEmailRequest) throw ApiError.conflict('A pending request already exists for this email');
   }
 
   const password_hash = await bcrypt.hash(password, 10);
@@ -301,14 +301,14 @@ const approveRegistrationRequest = asyncHandler(async (req, res) => {
     }
   }
 
-  const { error: updateError } = await supabase
+  const { error: deleteError } = await supabase
     .from('student_registration_requests')
-    .update({ status: 'approved', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
+    .delete()
     .eq('id', request.id);
-  if (updateError) {
+  if (deleteError) {
     await supabase.from('students').delete().eq('id', student.id);
     await supabase.from('users').delete().eq('id', user.id);
-    throw ApiError.badRequest(updateError.message);
+    throw ApiError.badRequest(deleteError.message);
   }
 
   sendResponse(res, 200, student, 'Registration request approved');
@@ -317,10 +317,10 @@ const approveRegistrationRequest = asyncHandler(async (req, res) => {
 const rejectRegistrationRequest = asyncHandler(async (req, res) => {
   const { data, error } = await supabase
     .from('student_registration_requests')
-    .update({ status: 'rejected', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
+    .delete()
     .eq('id', req.params.id)
     .eq('status', 'pending')
-    .select('id, username, email, full_name, status, reviewed_by, reviewed_at, created_at, updated_at')
+    .select('id, username, email, full_name, created_at')
     .single();
   if (error || !data) throw ApiError.notFound('Pending registration request not found');
   sendResponse(res, 200, data, 'Registration request rejected');

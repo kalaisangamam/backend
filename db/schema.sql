@@ -13,8 +13,8 @@ create extension if not exists "pgcrypto";
 create table if not exists users (
   id              uuid primary key default gen_random_uuid(),
   role            text not null check (role in ('admin', 'student')),
-  username        text not null unique,
-  email           text unique,
+  username        text not null,
+  email           text,
   password_hash   text not null,
   status          text not null default 'active' check (status in ('active', 'inactive')),
   last_login_at   timestamptz,
@@ -379,6 +379,9 @@ where key = 'site_info' and (value->>'flash_news') is null;
 -- =====================================================================
 create index if not exists idx_students_status on students(status);
 create index if not exists idx_student_registration_requests_status on student_registration_requests(status);
+
+create index if not exists idx_users_username on users(username);
+create index if not exists idx_users_email on users(email);
 create index if not exists idx_contact_enquiries_created_at on contact_enquiries(created_at desc);
 create index if not exists idx_contact_enquiries_status on contact_enquiries(status);
 create index if not exists idx_masters_order on masters(display_order);

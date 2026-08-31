@@ -27,17 +27,23 @@ const login = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('Username and password are required');
   }
 
-  const { data: user, error } = await supabase
+  const { data: users, error } = await supabase
     .from('users')
     .select('*')
-    .eq('username', username)
-    .single();
+    .eq('username', username);
 
-  if (error || !user) throw ApiError.unauthorized('Invalid username or password');
+  if (error || !users?.length) throw ApiError.unauthorized('Invalid username or password');
+
+  let user = null;
+  for (const candidate of users) {
+    if (await bcrypt.compare(password, candidate.password_hash)) {
+      user = candidate;
+      break;
+    }
+  }
+
+  if (!user) throw ApiError.unauthorized('Invalid username or password');
   if (user.status !== 'active') throw ApiError.forbidden('This account has been deactivated');
-
-  const passwordMatches = await bcrypt.compare(password, user.password_hash);
-  if (!passwordMatches) throw ApiError.unauthorized('Invalid username or password');
 
   let profile = null;
   if (user.role === 'student') {
