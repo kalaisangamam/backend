@@ -5,6 +5,7 @@ router.use('/students', require('./studentsRoutes'));
 router.use('/programs', require('./programsRoutes'));
 router.use('/masters', require('./mastersRoutes'));
 router.use('/achievements', require('./achievementsRoutes'));
+router.use('/student-achievements', require('./studentAchievementsRoutes'));
 router.use('/gallery', require('./galleryRoutes'));
 router.use('/announcements', require('./announcementsRoutes'));
 router.use('/events', require('./eventsRoutes'));
