@@ -120,6 +120,7 @@ create table if not exists programs (
   benefits          text[],            -- array of bullet points
   training_details  text,
   training_schedule text,
+  schedule           jsonb not null default '[]'::jsonb,
   levels            text[],            -- e.g. ['Level 1','Level 2','Level 3'] or belt names
   display_order     int not null default 0,
   status            text not null default 'active' check (status in ('active', 'inactive')),

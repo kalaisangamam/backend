@@ -6,6 +6,20 @@ const createGenericController = require('./genericController');
 
 const generic = createGenericController('programs', { orderBy: 'display_order' });
 
+const validateSchedule = (schedule) => {
+  if (schedule === undefined) return;
+  if (!Array.isArray(schedule)) throw ApiError.badRequest('schedule must be an array');
+  schedule.forEach((entry, index) => {
+    if (!entry || typeof entry.branch !== 'string' || !entry.branch.trim()) throw ApiError.badRequest(`Schedule ${index + 1}: branch is required`);
+    if (!Array.isArray(entry.days) || entry.days.length === 0) throw ApiError.badRequest(`Schedule ${index + 1}: select at least one day`);
+    if (!/^\d{2}:\d{2}$/.test(entry.start_time || '') || !/^\d{2}:\d{2}$/.test(entry.end_time || '') || entry.start_time >= entry.end_time) {
+      throw ApiError.badRequest(`Schedule ${index + 1}: enter a valid time range with the end after the start`);
+    }
+  });
+};
+const create = asyncHandler(async (req, res) => { validateSchedule(req.body.schedule); return generic.create(req, res); });
+const update = asyncHandler(async (req, res) => { validateSchedule(req.body.schedule); return generic.update(req, res); });
+
 // PUT /api/programs/:id/levels (admin) — keeps each programme's progression path independent.
 const updateLevels = asyncHandler(async (req, res) => {
   if (!Array.isArray(req.body.levels)) throw ApiError.badRequest('levels must be an array');
@@ -30,4 +44,4 @@ const getBySlug = asyncHandler(async (req, res) => {
   sendResponse(res, 200, data);
 });
 
-module.exports = { ...generic, getBySlug, updateLevels };
+module.exports = { ...generic, create, update, getBySlug, updateLevels };
