@@ -25,6 +25,7 @@ const generateStudentCode = async () => {
 // GET /api/students (admin) — optional ?search=&status=
 const studentProfileFields = [
   'full_name', 'date_of_birth', 'gender', 'parent_name', 'parent_contact',
+  'school_college', 'category', 'father_name', 'father_contact', 'father_occupation', 'mother_name', 'mother_contact', 'mother_occupation',
   'contact_number', 'address', 'blood_group', 'emergency_contact',
   'joining_date',
 ];
@@ -166,6 +167,7 @@ const createStudentFromPayload = async (body) => {
     .insert({
       user_id: user.id,
       student_code,
+      ...buildStudentProfilePayload(body),
       full_name,
       date_of_birth,
       gender,
@@ -237,7 +239,7 @@ const registerStudentRequest = asyncHandler(async (req, res) => {
       program_names: registrationProgramData.program_names,
       ...buildStudentProfilePayload(req.body),
     })
-    .select('id, username, email, full_name, program_id, program_ids, program_names, date_of_birth, gender, parent_name, parent_contact, contact_number, address, blood_group, emergency_contact, joining_date, status, created_at')
+    .select('id, username, email, full_name, program_id, program_ids, program_names, date_of_birth, gender, parent_name, parent_contact, school_college, category, father_name, father_contact, father_occupation, mother_name, mother_contact, mother_occupation, contact_number, address, blood_group, emergency_contact, joining_date, status, created_at')
     .single();
   if (error) throw ApiError.badRequest(error.message);
 
@@ -248,7 +250,7 @@ const listRegistrationRequests = asyncHandler(async (req, res) => {
   const { status = 'pending' } = req.query;
   let query = supabase
     .from('student_registration_requests')
-    .select('id, username, email, full_name, program_id, program_ids, date_of_birth, gender, parent_name, parent_contact, contact_number, address, blood_group, emergency_contact, joining_date, status, reviewed_by, reviewed_at, created_at, updated_at');
+    .select('id, username, email, full_name, program_id, program_ids, date_of_birth, gender, parent_name, parent_contact, school_college, category, father_name, father_contact, father_occupation, mother_name, mother_contact, mother_occupation, contact_number, address, blood_group, emergency_contact, joining_date, status, reviewed_by, reviewed_at, created_at, updated_at');
   if (status) query = query.eq('status', status);
   query = query.order('created_at', { ascending: false });
 
@@ -394,6 +396,7 @@ const createStudent = asyncHandler(async (req, res) => {
 const updateStudent = asyncHandler(async (req, res) => {
   const allowedFields = [
     'full_name', 'date_of_birth', 'gender', 'parent_name', 'parent_contact',
+  'school_college', 'category', 'father_name', 'father_contact', 'father_occupation', 'mother_name', 'mother_contact', 'mother_occupation',
     'contact_number', 'address', 'blood_group', 'emergency_contact',
     'joining_date', 'status', 'notes',
   ];
